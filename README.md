@@ -1,116 +1,127 @@
 # Minecraft Beta 1.7.3 Discord Bridge
 
-A Discord bot that bridges Minecraft Beta 1.7.3 servers with Discord by reading logs and sending commands through GNU screen.
+A lightweight Discord ↔ Minecraft chat bridge for **Beta 1.7.3** servers.
+
+**No plugins, no mods, no Bukkit required.** It works with the vanilla server jar by reading `server.log` and sending messages to the console through GNU screen, so it won't touch your server files and works with pretty much any Beta 1.7.3 setup.
+
+![In-game chat mirrored to a Discord channel](docs/screenshot.png)
 
 ## Features
 
-- ✅ **MC → Discord**: Chat messages, player join/leave events
-- ✅ **Discord → MC**: Discord messages in-game (using `say` command)
-- ✅ **Discord Embeds**: Formatted messages with player avatars (minotar.net)
-- ✅ **Screen Integration**: Direct command sending to screen session
+- **MC → Discord**: chat messages, player join/leave events
+- **Discord → MC**: Discord messages shown in-game (via the `say` command)
+- **Embeds** with player heads (via [minotar.net](https://minotar.net))
+- **Safe input handling**: Discord messages are sanitized before they reach the console, and long messages are split so they don't kick Beta clients
+- Tiny codebase (~250 lines of Python), easy to read and modify
 
 ## Requirements
 
-- Python 3.6+
-- Minecraft Beta 1.7.3 server running in GNU screen session
-- Discord Bot (token from Discord Developer Portal)
+- Linux (or anything with GNU `screen`)
+- Python 3.8+ (Python 3.6 works with `discord.py` 1.7.3)
+- Minecraft Beta 1.7.3 server running inside a `screen` session
+- A Discord bot token
 
 ## Installation
 
-### 1. Install dependencies
+### 1. Clone and install dependencies
+
 ```bash
-cd discord-bridge
+git clone https://github.com/OldBeardMan/minecraft-beta-1.7.3-discord-bridge.git
+cd minecraft-beta-1.7.3-discord-bridge
 pip3 install --user -r requirements.txt
 ```
 
-### 2. Discord Bot Setup
+### 2. Create a Discord bot
 
 1. Go to https://discord.com/developers/applications
 2. Create an application and add a bot
-3. Copy the TOKEN
-4. Enable **MESSAGE CONTENT INTENT** in Bot tab
-5. Add the bot to your server with permissions: Send Messages, Embed Links, Read Message History
+3. Copy the bot **token**
+4. In the **Bot** tab, enable **MESSAGE CONTENT INTENT**
+5. Invite the bot to your server with these permissions: Send Messages, Embed Links, Read Message History
 
-### 3. Configure .env
+### 3. Configure
 
-Edit the `.env` file:
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
 ```env
 DISCORD_TOKEN=your_token_here
 DISCORD_CHANNEL_ID=channel_id_here
-SERVER_LOG_PATH=../server/server.log
-SCREEN_SESSION_NAME=beta173
+SERVER_LOG_PATH=../server/server.log   # relative to bot.py, or an absolute path
+SCREEN_SESSION_NAME=minecraft
 MC_PREFIX=[Minecraft]
 DISCORD_PREFIX=[Discord]
 ```
 
-**How to find Channel ID?**
-Enable Developer Mode in Discord → Right-click on channel → Copy ID
+**Finding the channel ID:** enable Developer Mode in Discord (Settings → Advanced), then right-click the channel → Copy Channel ID.
 
-**How to find screen session name?**
+**Finding the screen session name:**
+
 ```bash
 screen -ls
-# Use the name without PID, e.g. "beta173"
+# e.g. "12345.minecraft"  ->  use "minecraft"
 ```
 
 ## Usage
 
+The Minecraft server must already be running in a screen session. Then start the bot in its own session:
+
 ```bash
-# MC server must already be running in screen
-screen -ls  # Check session name
-
-# Start the bot in a new screen session
 screen -S discord-bot
-cd discord-bridge
 python3 bot.py
-
-# Detach: Ctrl+A, D
+# Detach with Ctrl+A, D
 ```
 
 ## Commands
 
-- `!status` - Bot and connection status
+- `!status`: shows bot status, the screen session and whether the log file was found
 
 ## How it works
 
-**MC → Discord:**
-- Bot reads `server.log` every second (polling)
-- Detects regex patterns: chat, join, leave
-- Sends embeds to Discord
+**MC → Discord**
+- Polls `server.log` once per second for new lines
+- Matches chat, join and leave lines with regex
+- Posts them to the Discord channel as embeds
 
-**Discord → MC:**
-- Bot captures messages from the channel
-- Sends `say` command through `screen -X stuff`
-- Appears in-game as: `[Discord] Username: message`
+**Discord → MC**
+- Listens for messages in the configured channel
+- Strips characters that screen or Minecraft would interpret (control characters, `^`, `\`, `$`, `§`)
+- Sends `say [Discord] Username: message` with `screen -X stuff`
 
 ## Troubleshooting
 
-**Bot doesn't detect MC messages:**
-- Check if the `server.log` path is correct
-- Make sure the bot has read permissions for the file
+**The bot doesn't pick up Minecraft messages**
+- Check that `SERVER_LOG_PATH` points to the right file
+- Make sure the user running the bot can read it
 
-**Discord messages don't reach MC:**
-- Verify the screen session name is correct (`screen -ls`)
-- Check if the server is running in that session
+**Discord messages don't show up in-game**
+- Check the session name with `screen -ls`
+- Make sure the bot runs as the **same Linux user** as the server's screen session
 - Make sure `screen` is installed
 
-**Package installation issues:**
+**Installing packages on old systems (e.g. CentOS 7 / Python 3.6)**
 ```bash
-# For Python 3.6 you might need:
 sudo yum install python3-devel gcc -y
 pip3 install --user -r requirements.txt
 ```
 
-## Project Structure
+## Project structure
 
 ```
-discord-bridge/
 ├── bot.py                  # Main bot
-├── screen_integration.py   # GNU screen integration
+├── screen_integration.py   # GNU screen integration + input sanitizing
 ├── requirements.txt        # Python dependencies
-├── .env                    # Configuration (DO NOT commit!)
-└── README.md              # This documentation
+├── .env.example            # Configuration template
+└── README.md
 ```
+
+## Contributing
+
+Issues and pull requests are welcome! If your server uses a different log format (e.g. a modded or Bukkit server), open an issue and include a few sample log lines.
 
 ## License
 
-MIT
+[MIT](LICENSE)

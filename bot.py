@@ -6,18 +6,25 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime
-from screen_integration import send_to_screen
+from screen_integration import send_to_screen, sanitize_for_console
 
 # Load configuration from .env
 load_dotenv()
 
 # Configuration
 TOKEN = os.getenv('DISCORD_TOKEN')
-CHANNEL_ID = int(os.getenv('DISCORD_CHANNEL_ID'))
+try:
+    CHANNEL_ID = int(os.getenv('DISCORD_CHANNEL_ID', ''))
+except ValueError:
+    CHANNEL_ID = None
 SERVER_LOG_PATH = Path(__file__).parent / os.getenv('SERVER_LOG_PATH', '../server/server.log')
 SCREEN_SESSION = os.getenv('SCREEN_SESSION_NAME', 'minecraft')
 MC_PREFIX = os.getenv('MC_PREFIX', '[Minecraft]')
 DISCORD_PREFIX = os.getenv('DISCORD_PREFIX', '[Discord]')
+
+# Beta 1.7.3 clients disconnect on chat packets longer than 119 chars.
+# The console `say` command adds a "[Server] " prefix, so keep each line well below that.
+MAX_SAY_LENGTH = 100
 
 # Compatibility with discord.py 1.7.3
 def get_utcnow():
@@ -55,6 +62,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Global variables
 discord_channel = None
 last_log_position = 0
+polling_started = False
 
 
 def read_new_log_lines():
@@ -62,6 +70,9 @@ def read_new_log_lines():
     if not SERVER_LOG_PATH.exists():
         return []
     try:
+        # Log was truncated or replaced - start from the beginning
+        if SERVER_LOG_PATH.stat().st_size < last_log_position:
+            last_log_position = 0
         with open(SERVER_LOG_PATH, 'r', encoding='utf-8', errors='ignore') as f:
             f.seek(last_log_position)
             new_lines = f.readlines()
@@ -172,8 +183,12 @@ async def poll_log_file():
 
 @bot.event
 async def on_ready():
-    global discord_channel, last_log_position
+    global discord_channel, last_log_position, polling_started
     print(f"Bot logged in: {bot.user}")
+
+    # on_ready fires again after every reconnect - only initialize once
+    if polling_started:
+        return
 
     discord_channel = bot.get_channel(CHANNEL_ID)
     if not discord_channel:
@@ -195,6 +210,7 @@ async def on_ready():
             f.seek(0, 2)
             last_log_position = f.tell()
         print(f"Monitoring: {SERVER_LOG_PATH}")
+        polling_started = True
         bot.loop.create_task(poll_log_file())
     else:
         print(f"server.log not found: {SERVER_LOG_PATH}")
@@ -208,12 +224,19 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    username = message.author.display_name
-    print(f"[Discord] {username}: {message.content}")
-    sanitized = message.content.replace('§', '').replace('\n', ' ').replace('\r', '')
-    mc_message = f"say {DISCORD_PREFIX} {username}: {sanitized}"
-    await send_to_minecraft(mc_message)
-    await bot.process_commands(message)
+    username = sanitize_for_console(message.author.display_name) or 'Unknown'
+    text = sanitize_for_console(message.content)
+    if message.attachments:
+        text = f"{text} [attachment]".strip()
+    if not text:
+        return
+
+    print(f"[Discord] {username}: {text}")
+    header = f"{sanitize_for_console(DISCORD_PREFIX)} {username}: "
+    # Split long messages so no single line exceeds the client chat limit
+    chunk_size = max(MAX_SAY_LENGTH - len(header), 20)
+    for i in range(0, len(text), chunk_size):
+        await send_to_minecraft(f"say {header}{text[i:i + chunk_size]}")
 
 
 @bot.command(name='status')
@@ -230,7 +253,7 @@ async def status_command(ctx):
 if __name__ == "__main__":
     print("Discord Bridge for Minecraft Beta 1.7.3")
     if not TOKEN or not CHANNEL_ID:
-        print("Missing configuration in .env")
+        print("Missing or invalid DISCORD_TOKEN / DISCORD_CHANNEL_ID in .env")
         exit(1)
     try:
         bot.run(TOKEN)
