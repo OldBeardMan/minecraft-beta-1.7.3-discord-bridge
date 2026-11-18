@@ -206,14 +206,16 @@ async def on_ready():
     await discord_channel.send(embed=embed)
 
     if SERVER_LOG_PATH.exists():
-        with open(SERVER_LOG_PATH, 'r', encoding='utf-8', errors='ignore') as f:
-            f.seek(0, 2)
-            last_log_position = f.tell()
+        # Skip old history - only forward new lines
+        last_log_position = SERVER_LOG_PATH.stat().st_size
         print(f"Monitoring: {SERVER_LOG_PATH}")
-        polling_started = True
-        bot.loop.create_task(poll_log_file())
     else:
-        print(f"server.log not found: {SERVER_LOG_PATH}")
+        # The server hasn't created the log yet - read it from the start once it appears
+        last_log_position = 0
+        print(f"server.log not found yet, waiting for it: {SERVER_LOG_PATH}")
+
+    polling_started = True
+    bot.loop.create_task(poll_log_file())
 
 
 @bot.event
